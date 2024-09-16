@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import Butter from 'https://www.unpkg.com/butter-lib@1.1.0/dist.js';
 import L from 'leaflet';
 import './App.css';
+import axios from 'axios';
 import { initializeAuth, authIdToken, loggedInUser } from './auth';
 
 // Leafletのデフォルトアイコン設定
@@ -26,16 +27,15 @@ function App() {
     initializeAuth();
 
     // butter-libを初期化
-    Butter.init('https://butter.takoyaki3.com/v1.0.0/root.json', { version: '1.0.0' }).then(() => {
-      // 初期化後にバス情報を取得
+    Butter.init().then(() => {
       fetchBuses();
     });
   }, []);
 
   const fetchBuses = async () => {
     try {
-      const defaultLat = 35.6895;
-      const defaultLon = 139.6917;
+      const defaultLat = 26.223300;
+      const defaultLon = 127.691028;
 
       // 周辺のリアルタイムなバス位置情報を取得
       const positions = await Butter.getRealTimePositionsByLatLon(defaultLat, defaultLon);
@@ -50,22 +50,38 @@ function App() {
 
   const handleBusClick = async (bus) => {
     setSelectedBus(bus);
-    try {
-      const tripId = bus.trip_id || bus.tripId;
-      const gtfsId = bus.gtfs_id || bus.gtfsId;
+    
+    // busオブジェクトをコンソールに出力して構造を確認
+    console.log("選択したバスのデータ:", bus);
   
-      if (!gtfsId) {
-        console.error("gtfsIdが見つかりませんでした。");
+    try {
+      // 固定されたGTFS-ID
+      const gtfsId = 'yanbaru-expressbus'; // 実際のGTFS-IDに置き換えてください
+  
+      // busオブジェクトの中にどのフィールドに tripId があるか確認
+      const tripId = bus.vehicle.trip.tripId;
+  
+      if (!tripId) {
+        console.error("tripIdが見つかりませんでした。");
         return;
       }
+      console.log("使用する tripId:", tripId);
   
       const versionId = await Butter.getVersionId(gtfsId);
+      console.log("使用する versionId:", versionId);
   
       // 停車時刻情報を取得
       const stopTimes = await Butter.getStopTimes(gtfsId, versionId);
-      const tripStopTimes = stopTimes.filter((st) => st.trip_id === tripId);
+      console.log("取得した stopTimes:", stopTimes);
   
-      // 現在時刻以降の停留所のみを取得
+      const tripStopTimes = stopTimes.filter((st) => st.trip_id === tripId);
+      console.log("tripId に一致する tripStopTimes:", tripStopTimes);
+  
+      if (tripStopTimes.length === 0) {
+        console.error("該当する tripStopTimes が見つかりませんでした。");
+        return;
+      }
+  
       const now = new Date();
       const currentTimeInSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
   
@@ -74,9 +90,15 @@ function App() {
         const arrivalTimeInSeconds = hours * 3600 + minutes * 60 + seconds;
         return arrivalTimeInSeconds >= currentTimeInSeconds;
       });
+      console.log("現在時刻以降の upcomingStops:", upcomingStops);
   
-      const stopIds = upcomingStops.map((st) => st.stop_id);
+      if (upcomingStops.length === 0) {
+        console.error("現在時刻以降の停留所が見つかりませんでした。");
+        return;
+      }
+  
       const stops = await Butter.getBusStops(gtfsId, versionId);
+      console.log("取得したバス停情報:", stops);
   
       const busStopsWithTimes = upcomingStops.map((st) => {
         const stop = stops.find((s) => s.stop_id === st.stop_id);
@@ -91,7 +113,7 @@ function App() {
     } catch (error) {
       console.error('停留所情報の取得中にエラーが発生しました:', error);
     }
-  };
+  };  
 
   const handleBusStopClick = async (stop) => {
     try {
@@ -101,7 +123,7 @@ function App() {
         type: 'arrivingAtTheStop',
         triggerDetail: {
           gtfs_id: selectedBus.gtfs_id || selectedBus.gtfsId,
-          trip_id: selectedBus.trip_id || selectedBus.tripId,
+          trip_id: selectedBus.vehicle.trip.tripId, // trip_idを正しく取得して登録
           stop_id: stop.stop_id,
         },
       };
@@ -113,14 +135,19 @@ function App() {
         readable: 'window-grapher@takoyaki3.com',
       };
 
-      // kva-dynamoにリクエストを送信 (仮実装部分)
-      // const response = await kvaDynamo.addItem(payload, authIdToken);
+      console.log({authIdToken, payload});
 
-      // if (response.status === 200) {
-      //   setMessage('登録が完了しました');
-      // } else {
-      //   setMessage('登録に失敗しました');
-      // }
+      // REST APIにリクエストを送信
+      const response = await axios.post('https://mfp6wj7mv6mf45q6o3tse7v4oe0gzgrp.lambda-url.ap-northeast-1.on.aws/', payload, {
+        headers: {
+          Authorization: `Bearer ${authIdToken}`,
+        },
+      });
+      if (response.status === 200) {
+        setMessage('登録が完了しました');
+      } else {
+        setMessage('登録に失敗しました');
+      }
     } catch (error) {
       console.error('通知の登録中にエラーが発生しました:', error);
       setMessage('登録に失敗しました');
@@ -131,7 +158,7 @@ function App() {
     <div>
       <h1>バス通知アプリ</h1>
       {message && <p>{message}</p>}
-      <MapContainer center={[35.6895, 139.6917]} zoom={13} style={{ height: '500px', width: '100%' }}>
+      <MapContainer center={[26.228682, 127.683985]} zoom={13} style={{ height: '500px', width: '100%' }}>
         <TileLayer
           attribution='&copy; OpenStreetMap contributors'
           url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
